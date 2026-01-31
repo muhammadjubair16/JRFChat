@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Friends Chat</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background-color: #f0f2f5; }
+        #chat-container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        
+        #messages { border: 1px solid #ddd; height: 400px; overflow-y: scroll; padding: 10px; margin-bottom: 10px; background: #fff; border-radius: 5px; display: flex; flex-direction: column; }
+        
+        .message-item { 
+            margin-bottom: 8px; 
+            padding: 10px; 
+            border-radius: 10px; 
+            background-color: #e9e9e9; 
+            width: fit-content; 
+            max-width: 80%;
+            word-wrap: break-word;
+            position: relative;
+        }
+
+        .my-message { background-color: #dcf8c6 !important; align-self: flex-end; }
+
+        .delete-btn {
+            color: red;
+            cursor: pointer;
+            font-size: 14px;
+            margin-left: 10px;
+            font-weight: bold;
+            display: none;
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: white;
+            border-radius: 50%;
+            padding: 2px 5px;
+            border: 1px solid #ccc;
+        }
+        
+        .my-message .delete-btn { display: block; }
+        
+        /* Image Styles */
+        .chat-image { max-width: 200px; border-radius: 5px; display: block; }
+
+        .input-area { display: flex; align-items: center; gap: 10px; }
+        input[type="text"] { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 20px; }
+        button { padding: 10px 20px; background-color: #0084ff; color: white; border: none; border-radius: 20px; cursor: pointer; }
+        
+        /* File Upload Button */
+        .file-upload { cursor: pointer; font-size: 24px; }
+        #fileInput { display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="chat-container">
+        <h2>Friends Chat Room</h2>
+        <div id="messages">
+            {% for msg in messages %}
+                <div class="message-item" id="msg-{{ msg.id }}">
+                    <span class="delete-btn" onclick="deleteMessage({{ msg.id }})">×</span>
+                    {% if msg.msg_type == 'image' %}
+                        <img src="{{ msg.content }}" class="chat-image">
+                    {% else %}
+                        <span class="text">{{ msg.content }}</span>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+        
+        <div class="input-area">
+            <label for="fileInput" class="file-upload">📎</label>
+            <input type="file" id="fileInput" accept="image/*" onchange="uploadFile()">
+            
+            <input type="text" id="myMessage" placeholder="Type a message...">
+            <button onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        var socket = io();
+        var username = "";
+
+        while(!username) {
+            username = prompt("Enter your name:");
+        }
+
+        function styleMessages() {
+            var items = document.getElementsByClassName('message-item');
+            for (var i = 0; i < items.length; i++) {
+                // Determine ownership by checking text prefix OR custom logic
+                // Simple logic: If delete btn is visible, it's mine? No.
+                // For now, let's keep text based check, but for images we might need better logic later.
+                // Assuming text messages still have "Name:" prefix.
+                var textSpan = items[i].querySelector('.text');
+                if (textSpan && textSpan.textContent.startsWith(username + ":")) {
+                    items[i].classList.add('my-message');
+                }
+            }
+        }
+        // Initial styling might be tricky for old images without username tag, but let's proceed.
+        
+        socket.on('message', function(data) {
+            var item = document.createElement('div');
+            item.className = 'message-item';
+            item.id = 'msg-' + data.id;
+            
+            // Check if it's my message
+            if (data.type === 'text' && data.msg.startsWith(username + ":")) {
+                item.classList.add('my-message');
+            }
+            // For images, we can't easily check owner without DB update, 
+            // but for now, let's show them normally.
+            
+            var contentHtml = '';
+            if (data.type === 'image') {
+                contentHtml = '<img src="' + data.msg + '" class="chat-image">';
+            } else {
+                contentHtml = '<span class="text">' + data.msg + '</span>';
+            }
+
+            item.innerHTML = '<span class="delete-btn" onclick="deleteMessage(' + data.id + ')">×</span>' + contentHtml;
+            
+            document.getElementById('messages').appendChild(item);
+            var chatBox = document.getElementById("messages");
+            chatBox.scrollTop = chatBox.scrollHeight;
+        });
+
+        socket.on('delete_message', function(data) {
+            var element = document.getElementById('msg-' + data.id);
+            if (element) element.remove();
+        });
+
+        function sendMessage() {
+            var input = document.getElementById('myMessage');
+            if (input.value) {
+                socket.emit('message', username + ": " + input.value);
+                input.value = ''; 
+            }
+        }
+        
+        function uploadFile() {
+            var fileInput = document.getElementById('fileInput');
+            var file = fileInput.files[0];
+            var formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                console.log('File uploaded successfully');
+                fileInput.value = ''; // Reset input
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+        }
+
+        function deleteMessage(id) {
+            if (confirm("Delete this message?")) {
+                socket.emit('delete_message', {id: id});
+            }
+        }
+
+        document.getElementById("myMessage").addEventListener("keypress", function(event) {
+            if (event.key === "Enter") sendMessage();
+        });
+        
+        window.onload = function() {
+            var chatBox = document.getElementById("messages");
+            chatBox.scrollTop = chatBox.scrollHeight;
+        };
+    </script>
+</body>
+</html>
